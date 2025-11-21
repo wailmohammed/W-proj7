@@ -145,7 +145,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let avatar = undefined;
       let joinedDate = new Date().toISOString().split('T')[0];
 
-      if (data && !error) {
+      if (error) {
+          if (error.code === 'PGRST116' || error.message.includes('0 rows')) {
+              // Missing Row: Logic to auto-fix if triggers failed
+              console.log("Profile missing for user, attempting to create default profile...");
+              const { error: insertError } = await supabase.from('profiles').insert({
+                  id: userId,
+                  email: email,
+                  full_name: 'User',
+                  role: 'USER',
+                  plan: 'Free'
+              });
+              
+              if (!insertError) {
+                  // Retry fetch after insertion
+                  return fetchUserProfile(userId, email);
+              } else {
+                  if (insertError.code === '42P01') {
+                      console.error("CRITICAL: Database tables missing. Please run supabase_schema.sql");
+                  } else {
+                      console.error("Failed to auto-create profile:", insertError);
+                  }
+              }
+          } else if (error.code === '42P01') {
+              // 42P01 is 'undefined_table' in Postgres
+              console.error("CRITICAL: Database tables missing (profiles table not found).");
+          } else {
+              console.error('Error fetching profile data:', error);
+          }
+      } else if (data) {
           role = (data.role as UserRole) || 'USER';
           plan = (data.plan as PlanTier) || 'Free';
           name = data.full_name || 'User';
@@ -153,28 +181,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (data.created_at) {
               joinedDate = new Date(data.created_at).toISOString().split('T')[0];
           }
-      } else if (error && error.code === 'PGRST116') {
-          // ERROR: PGRST116 means "Results contain 0 rows". 
-          // This happens if the user exists in Auth but not in Profiles (e.g. created before schema existed).
-          // Self-healing: Create the profile now.
-          console.log("Profile missing, creating default profile...");
-          const { error: insertError } = await supabase.from('profiles').insert({
-              id: userId,
-              email: email,
-              full_name: 'User',
-              role: 'USER',
-              plan: 'Free'
-          });
-          
-          if (!insertError) {
-              // Retry fetch recursively once
-              return fetchUserProfile(userId, email);
-          }
       }
 
       // --- CRITICAL: ROLE OVERRIDE FOR DEMO CREDENTIALS ---
-      // Ensures admins can access the panel even if the DB row hasn't updated yet
-      if (email.toLowerCase() === 'wailafmohammed@gmail.com') {
+      if (email.toLowerCase() === 'wailafmohammed@gmail.com' || email.toLowerCase() === 'wailafbdallad@gmail.com') {
           role = 'SUPER_ADMIN';
           plan = 'Ultimate';
           name = 'Wail (Super Admin)';
@@ -206,7 +216,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       fetchIntegrations(userId);
 
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Error in profile flow:', error);
       // Fallback to basic user state on error to prevent lock-out
       setUser({
         id: userId,
@@ -223,7 +233,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchAllUsers = async () => {
       if (!isSupabaseConfigured) return;
-      const { data } = await supabase.from('profiles').select('*');
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error && error.code === '42P01') return; // Tables missing
+      
       if (data) {
           const users: User[] = data.map(p => ({
               id: p.id,
@@ -240,7 +252,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchIntegrations = async (userId: string) => {
       if (!isSupabaseConfigured) return;
-      const { data } = await supabase.from('broker_integrations').select('*').eq('user_id', userId);
+      const { data, error } = await supabase.from('broker_integrations').select('*').eq('user_id', userId);
+      if (error && error.code === '42P01') return; // Tables missing
+
       if (data) {
           const ints: BrokerIntegration[] = data.map(i => ({
               id: i.id,
@@ -268,11 +282,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }
 
-    // 2. Fallback for Demo Accounts (Only if Supabase fails or is not configured)
+    // 2. Fallback for Demo Accounts
     const demoAccounts: Record<string, User> = {
         'wailafmohammed@gmail.com': {
             id: 'super-admin-wail',
             email: 'wailafmohammed@gmail.com',
+            name: 'Wail (Super Admin)',
+            role: 'SUPER_ADMIN',
+            plan: 'Ultimate',
+            joinedDate: new Date().toISOString().split('T')[0],
+            avatar: 'https://ui-avatars.com/api/?name=Wail+Mohammed&background=6366f1&color=fff'
+        },
+        'wailafbdallad@gmail.com': {
+            id: 'super-admin-wail-alt',
+            email: 'wailafbdallad@gmail.com',
             name: 'Wail (Super Admin)',
             role: 'SUPER_ADMIN',
             plan: 'Ultimate',
@@ -408,7 +431,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setIntegrations(prev => [...prev, newIntegration]);
 
-    if (isSupabaseConfigured && user && !user.id.startsWith('mock')) {
+    if (isSupabaseConfigured && user && !user.id.startsWith('mock') && !user.id.startsWith('super-admin') && !user.id.startsWith('admin-demo')) {
         const { error } = await supabase.from('broker_integrations').insert({
             user_id: user.id,
             provider_id: providerId,
@@ -425,7 +448,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const disconnectBroker = async (id: string) => {
       setIntegrations(prev => prev.filter(i => i.id !== id));
-      if (isSupabaseConfigured && user && !user.id.startsWith('mock')) {
+      if (isSupabaseConfigured && user && !user.id.startsWith('mock') && !user.id.startsWith('super-admin')) {
           await supabase.from('broker_integrations').delete().eq('id', id);
       }
   };

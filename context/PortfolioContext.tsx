@@ -87,26 +87,34 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
         return;
     }
 
-    const { data, error } = await supabase
-      .from('portfolios')
-      .select('id, name, type')
-      .eq('user_id', user.id);
+    try {
+        const { data, error } = await supabase
+          .from('portfolios')
+          .select('id, name, type')
+          .eq('user_id', user.id);
 
-    if (error) {
-      console.error('Error fetching portfolios:', error);
-      return;
-    }
+        if (error) {
+          console.error('Error fetching portfolios:', error.message || JSON.stringify(error));
+          // If table missing (42P01), don't crash, just show empty state
+          if (error.code === '42P01') {
+              console.warn("Database tables missing. Please run supabase_schema.sql");
+          }
+          return;
+        }
 
-    if (data && data.length > 0) {
-      const summaries: PortfolioSummary[] = data.map(p => ({ id: p.id, name: p.name, type: p.type }));
-      setPortfolios(summaries);
-      // Only set default if none selected
-      if (!activePortfolioId) {
-          setActivePortfolioId(data[0].id); 
-      }
-    } else if (data && data.length === 0) {
-      // Create a default portfolio if none exists
-      addNewPortfolio('My First Portfolio', 'Mixed');
+        if (data && data.length > 0) {
+          const summaries: PortfolioSummary[] = data.map(p => ({ id: p.id, name: p.name, type: p.type as any }));
+          setPortfolios(summaries);
+          // Only set default if none selected
+          if (!activePortfolioId) {
+              setActivePortfolioId(data[0].id); 
+          }
+        } else if (data && data.length === 0) {
+          // Create a default portfolio if none exists
+          addNewPortfolio('My First Portfolio', 'Mixed');
+        }
+    } catch (err) {
+        console.error("Unexpected error in fetchPortfoliosList", err);
     }
   }, [user, activePortfolioId]);
 
@@ -128,72 +136,89 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
           return;
       }
 
-      // ... Real Supabase fetching logic (same as before) ...
-      const { data: portData } = await supabase.from('portfolios').select('*').eq('id', activePortfolioId).single();
-      const { data: holdingsData } = await supabase.from('holdings').select('*').eq('portfolio_id', activePortfolioId);
-      const { data: txData } = await supabase.from('transactions').select('*').eq('portfolio_id', activePortfolioId).order('date', { ascending: false });
-      const { data: assetsData } = await supabase.from('manual_assets').select('*').eq('portfolio_id', activePortfolioId);
-      const { data: liabData } = await supabase.from('liabilities').select('*').eq('portfolio_id', activePortfolioId);
+      try {
+          // Parallel fetching for performance
+          const [
+              { data: portData, error: portError },
+              { data: holdingsData },
+              { data: txData },
+              { data: assetsData },
+              { data: liabData }
+          ] = await Promise.all([
+              supabase.from('portfolios').select('*').eq('id', activePortfolioId).single(),
+              supabase.from('holdings').select('*').eq('portfolio_id', activePortfolioId),
+              supabase.from('transactions').select('*').eq('portfolio_id', activePortfolioId).order('date', { ascending: false }),
+              supabase.from('manual_assets').select('*').eq('portfolio_id', activePortfolioId),
+              supabase.from('liabilities').select('*').eq('portfolio_id', activePortfolioId)
+          ]);
 
-      if (portData) {
-        const mappedHoldings: Holding[] = (holdingsData || []).map(h => ({
-            id: h.id,
-            symbol: h.symbol,
-            name: h.name,
-            shares: parseFloat(h.shares),
-            avgPrice: parseFloat(h.avg_price),
-            currentPrice: MOCK_MARKET_ASSETS.find(m => m.symbol === h.symbol)?.currentPrice || parseFloat(h.avg_price),
-            assetType: h.asset_type as AssetType,
-            sector: h.sector || 'Diversified',
-            country: h.country || 'Global',
-            dividendYield: parseFloat(h.dividend_yield) || 0,
-            safetyScore: h.safety_score || 50,
-            snowflake: h.snowflake_data || { value: 3, future: 3, past: 3, health: 3, dividend: 3, total: 15 },
-            targetAllocation: parseFloat(h.target_allocation) || 0,
-            logoUrl: `https://logo.clearbit.com/${h.name ? h.name.split(' ')[0] : 'google'}.com`
-        }));
+          if (portError) {
+              console.error("Error fetching active portfolio details:", portError.message);
+              return;
+          }
 
-        const mappedTx: Transaction[] = (txData || []).map(t => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            symbol: t.symbol,
-            shares: parseFloat(t.shares),
-            price: parseFloat(t.price),
-            totalValue: parseFloat(t.total_value) || (parseFloat(t.shares) * parseFloat(t.price))
-        }));
+          if (portData) {
+            const mappedHoldings: Holding[] = (holdingsData || []).map(h => ({
+                id: h.id,
+                symbol: h.symbol,
+                name: h.name,
+                shares: parseFloat(h.shares),
+                avgPrice: parseFloat(h.avg_price),
+                currentPrice: MOCK_MARKET_ASSETS.find(m => m.symbol === h.symbol)?.currentPrice || parseFloat(h.avg_price),
+                assetType: h.asset_type as AssetType,
+                sector: h.sector || 'Diversified',
+                country: h.country || 'Global',
+                dividendYield: parseFloat(h.dividend_yield) || 0,
+                safetyScore: h.safety_score || 50,
+                snowflake: h.snowflake_data || { value: 3, future: 3, past: 3, health: 3, dividend: 3, total: 15 },
+                targetAllocation: parseFloat(h.target_allocation) || 0,
+                logoUrl: `https://logo.clearbit.com/${h.name ? h.name.split(' ')[0] : 'google'}.com`
+            }));
 
-        const mappedAssets: ManualAsset[] = (assetsData || []).map(a => ({
-            id: a.id,
-            name: a.name,
-            type: a.type,
-            value: parseFloat(a.value),
-            currency: a.currency,
-            purchaseDate: a.purchase_date,
-            purchasePrice: parseFloat(a.purchase_price)
-        }));
+            const mappedTx: Transaction[] = (txData || []).map(t => ({
+                id: t.id,
+                date: t.date,
+                type: t.type,
+                symbol: t.symbol,
+                shares: parseFloat(t.shares),
+                price: parseFloat(t.price),
+                totalValue: parseFloat(t.total_value) || (parseFloat(t.shares) * parseFloat(t.price))
+            }));
 
-        const mappedLiabilities: Liability[] = (liabData || []).map(l => ({
-            id: l.id,
-            name: l.name,
-            type: l.type,
-            amount: parseFloat(l.amount),
-            interestRate: parseFloat(l.interest_rate),
-            monthlyPayment: parseFloat(l.monthly_payment)
-        }));
+            const mappedAssets: ManualAsset[] = (assetsData || []).map(a => ({
+                id: a.id,
+                name: a.name,
+                type: a.type,
+                value: parseFloat(a.value),
+                currency: a.currency,
+                purchaseDate: a.purchase_date,
+                purchasePrice: parseFloat(a.purchase_price)
+            }));
 
-        const calculatedTotalValue = mappedHoldings.reduce((sum, h) => sum + (h.shares * h.currentPrice), 0);
+            const mappedLiabilities: Liability[] = (liabData || []).map(l => ({
+                id: l.id,
+                name: l.name,
+                type: l.type,
+                amount: parseFloat(l.amount),
+                interestRate: parseFloat(l.interest_rate),
+                monthlyPayment: parseFloat(l.monthly_payment)
+            }));
 
-        setActivePortfolio({
-            id: portData.id,
-            name: portData.name,
-            totalValue: calculatedTotalValue,
-            cashBalance: parseFloat(portData.cash_balance) || 0,
-            holdings: mappedHoldings,
-            transactions: mappedTx,
-            manualAssets: mappedAssets,
-            liabilities: mappedLiabilities
-        });
+            const calculatedTotalValue = mappedHoldings.reduce((sum, h) => sum + (h.shares * h.currentPrice), 0);
+
+            setActivePortfolio({
+                id: portData.id,
+                name: portData.name,
+                totalValue: calculatedTotalValue,
+                cashBalance: parseFloat(portData.cash_balance) || 0,
+                holdings: mappedHoldings,
+                transactions: mappedTx,
+                manualAssets: mappedAssets,
+                liabilities: mappedLiabilities
+            });
+          }
+      } catch (e) {
+          console.error("Exception fetching portfolio data:", e);
       }
   }, [activePortfolioId, user]);
 
@@ -245,24 +270,22 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [isMarketOpen, activePortfolio.holdings.length]);
 
   const fetchWatchlists = async () => {
-      // ... existing fetchWatchlists logic ...
       if (!user) return;
       if (!isSupabaseConfigured) {
           setWatchlists([{ id: 'w1', name: 'My First Watchlist', symbols: ['AAPL', 'TSLA', 'BTC'] }]);
           setActiveWatchlistId('w1');
           return;
       }
-      const { data } = await supabase.from('watchlists').select('*').eq('user_id', user.id);
-      if (data && data.length > 0) {
+      const { data, error } = await supabase.from('watchlists').select('*').eq('user_id', user.id);
+      if (!error && data && data.length > 0) {
           setWatchlists(data.map(w => ({ id: w.id, name: w.name, symbols: w.symbols || [] })));
           setActiveWatchlistId(data[0].id);
-      } else {
+      } else if (!error) {
           createWatchlist('My First Watchlist');
       }
   };
 
   const addNewPortfolio = async (name: string, type: 'Stock' | 'Crypto' | 'Mixed') => {
-      // ... existing addNewPortfolio logic ...
       if (!user) return;
       if (!isSupabaseConfigured) {
           const newId = `mock-p-${Date.now()}`;
@@ -270,7 +293,11 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
           setActivePortfolioId(newId);
           return;
       }
-      const { data } = await supabase.from('portfolios').insert({ user_id: user.id, name, type, cash_balance: 0 }).select().single();
+      const { data, error } = await supabase.from('portfolios').insert({ user_id: user.id, name, type, cash_balance: 0 }).select().single();
+      if (error) {
+          console.error("Error creating portfolio:", error.message);
+          return;
+      }
       if (data) {
           setPortfolios(prev => [...prev, { id: data.id, name: data.name, type: data.type }]);
           setActivePortfolioId(data.id);
@@ -278,7 +305,6 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
   };
 
   const addTransaction = async (assetId: string, type: 'BUY' | 'SELL', shares: number, price: number, date: string) => {
-      // ... existing addTransaction logic ...
       if (!activePortfolioId || !user) return;
       const marketAsset = MOCK_MARKET_ASSETS.find(a => a.id === assetId);
       if (!marketAsset) return;
@@ -314,23 +340,119 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
           setNotifications(prev => [newNotif, ...prev]);
           return;
       }
-      // ... Supabase insert logic would go here ...
+      
+      // Supabase Logic
+      try {
+          // 1. Insert Transaction
+          const { error: txError } = await supabase.from('transactions').insert({
+              portfolio_id: activePortfolioId,
+              date,
+              type,
+              symbol: marketAsset.symbol,
+              shares,
+              price,
+              total_value: shares * price
+          });
+          if (txError) throw txError;
+
+          // 2. Check if holding exists
+          const { data: existingHolding } = await supabase.from('holdings').select('*').eq('portfolio_id', activePortfolioId).eq('symbol', marketAsset.symbol).single();
+
+          if (existingHolding) {
+              let newShares = parseFloat(existingHolding.shares);
+              let currentAvg = parseFloat(existingHolding.avg_price);
+              
+              if (type === 'BUY') {
+                  const totalCost = (newShares * currentAvg) + (shares * price);
+                  newShares += shares;
+                  currentAvg = totalCost / newShares;
+              } else {
+                  newShares -= shares;
+              }
+
+              if (newShares <= 0) {
+                  await supabase.from('holdings').delete().eq('id', existingHolding.id);
+              } else {
+                  await supabase.from('holdings').update({ shares: newShares, avg_price: currentAvg }).eq('id', existingHolding.id);
+              }
+          } else if (type === 'BUY') {
+              await supabase.from('holdings').insert({
+                  portfolio_id: activePortfolioId,
+                  symbol: marketAsset.symbol,
+                  name: marketAsset.name,
+                  shares,
+                  avg_price: price,
+                  asset_type: marketAsset.assetType,
+                  sector: marketAsset.sector,
+                  country: marketAsset.country,
+                  dividend_yield: marketAsset.dividendYield,
+                  safety_score: marketAsset.safetyScore,
+                  snowflake_data: marketAsset.snowflake,
+                  target_allocation: 0
+              });
+          }
+          
+          fetchPortfolioData();
+          
+          const newNotif: Notification = { id: Date.now().toString(), type: 'success', title: 'Transaction Saved', message: `Saved ${type} ${shares} ${marketAsset.symbol}`, timestamp: 'Just now', read: false };
+          setNotifications(prev => [newNotif, ...prev]);
+
+      } catch (error: any) {
+          console.error("Error adding transaction:", error);
+          const newNotif: Notification = { id: Date.now().toString(), type: 'error', title: 'Error', message: error.message || 'Failed to save transaction', timestamp: 'Just now', read: false };
+          setNotifications(prev => [newNotif, ...prev]);
+      }
   };
 
   const addManualAsset = async (asset: Omit<ManualAsset, 'id'>) => {
-      // ... existing logic ...
+      if (!activePortfolioId || !isSupabaseConfigured) return;
+      await supabase.from('manual_assets').insert({
+          portfolio_id: activePortfolioId,
+          name: asset.name,
+          type: asset.type,
+          value: asset.value,
+          currency: asset.currency,
+          purchase_date: asset.purchaseDate,
+          purchase_price: asset.purchasePrice
+      });
+      fetchPortfolioData();
   };
 
   const addLiability = async (liability: Omit<Liability, 'id'>) => {
-      // ... existing logic ...
+      if (!activePortfolioId || !isSupabaseConfigured) return;
+      await supabase.from('liabilities').insert({
+          portfolio_id: activePortfolioId,
+          name: liability.name,
+          type: liability.type,
+          amount: liability.amount,
+          interest_rate: liability.interestRate,
+          monthly_payment: liability.monthlyPayment
+      });
+      fetchPortfolioData();
   };
 
   const createWatchlist = async (name: string) => {
-      // ... existing logic ...
+      if (!user || !isSupabaseConfigured) return;
+      const { data } = await supabase.from('watchlists').insert({ user_id: user.id, name, symbols: [] }).select().single();
+      if (data) {
+          setWatchlists(prev => [...prev, { id: data.id, name: data.name, symbols: [] }]);
+          setActiveWatchlistId(data.id);
+      }
   };
 
   const toggleWatchlist = async (symbol: string) => {
-      // ... existing logic ...
+      if (!activeWatchlistId || !isSupabaseConfigured) return;
+      const watchlist = watchlists.find(w => w.id === activeWatchlistId);
+      if (!watchlist) return;
+
+      const newSymbols = watchlist.symbols.includes(symbol) 
+        ? watchlist.symbols.filter(s => s !== symbol)
+        : [...watchlist.symbols, symbol];
+
+      const { error } = await supabase.from('watchlists').update({ symbols: newSymbols }).eq('id', activeWatchlistId);
+      if (!error) {
+          setWatchlists(prev => prev.map(w => w.id === activeWatchlistId ? { ...w, symbols: newSymbols } : w));
+      }
   };
 
   // Helpers
