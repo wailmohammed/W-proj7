@@ -39,15 +39,31 @@ const AIAssistant: React.FC = () => {
   // Initialize Chat Session when opened
   useEffect(() => {
     if (isOpen && !chatSession) {
+        const totalVal = activePortfolio.totalValue;
+        const cash = activePortfolio.cashBalance;
+        const holdingsCount = activePortfolio.holdings.length;
+        const topHoldings = [...activePortfolio.holdings]
+            .sort((a, b) => (b.shares * b.currentPrice) - (a.shares * a.currentPrice))
+            .slice(0, 3)
+            .map(h => `${h.symbol} (${((h.shares * h.currentPrice)/totalVal * 100).toFixed(1)}%)`)
+            .join(', ');
+        
+        const totalYield = totalVal > 0 
+            ? activePortfolio.holdings.reduce((acc, h) => acc + (h.shares * h.currentPrice * (h.dividendYield/100)), 0) / totalVal * 100 
+            : 0;
+
         const portfolioContext = `
-            CURRENT PORTFOLIO CONTEXT (${new Date().toLocaleDateString()}):
+            CURRENT PORTFOLIO SNAPSHOT (${new Date().toLocaleDateString()}):
             Portfolio Name: ${activePortfolio.name}
-            Total Value: $${activePortfolio.totalValue.toFixed(2)}
-            Cash Balance: $${activePortfolio.cashBalance.toFixed(2)}
+            Total Net Asset Value: $${totalVal.toFixed(2)}
+            Cash Available: $${cash.toFixed(2)}
+            Number of Holdings: ${holdingsCount}
+            Top 3 Concentrations: ${topHoldings}
+            Weighted Dividend Yield: ${totalYield.toFixed(2)}%
             
-            HOLDINGS SUMMARY:
+            HOLDINGS DETAIL:
             ${activePortfolio.holdings.map(h => 
-                `- ${h.symbol} (${h.name}): ${h.shares} shares @ $${h.currentPrice.toFixed(2)}. Total Value: $${(h.shares * h.currentPrice).toFixed(2)}.`
+                `- ${h.symbol} (${h.name}): ${h.shares} sh @ $${h.currentPrice.toFixed(2)}. Value: $${(h.shares * h.currentPrice).toFixed(2)}. Sector: ${h.sector}. Yield: ${h.dividendYield}%.`
             ).join('\n')}
         `;
 
@@ -56,7 +72,11 @@ const AIAssistant: React.FC = () => {
             config: {
                 systemInstruction: `You are WealthOS AI, an expert financial assistant embedded in a wealth management app.
                 You are helpful, professional, and concise.
-                You have access to the user's portfolio data.
+                
+                Your goal is to provide personalized insights based on the user's specific portfolio data provided below.
+                - If the user asks for "risk analysis", analyze their sector concentration and high-beta stocks (Tech/Crypto).
+                - If the user asks for "dividend advice", look at their yield and payout safety.
+                - If the user asks to "compare to S&P 500", give general market context.
                 
                 CRITICAL: When a user asks to buy or sell a stock, you MUST use the 'addTransaction' tool. 
                 If you use the tool, confirm the action in your text response briefly.
@@ -253,7 +273,7 @@ const AIAssistant: React.FC = () => {
                                 type="text"
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
-                                placeholder={isListening ? "Listening..." : "Ask or say 'Buy 10 AAPL'..."}
+                                placeholder={isListening ? "Listening..." : "Ask 'Analyze my risks'"}
                                 className={`w-full bg-slate-900 border text-white text-sm rounded-xl py-3 pl-4 pr-10 focus:outline-none focus:ring-1 transition-all ${isListening ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-700 focus:border-brand-500 focus:ring-brand-500'}`}
                             />
                             <button 

@@ -138,11 +138,20 @@ export interface SocialPost {
 
 export interface Notification {
   id: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type: 'info' | 'success' | 'warning' | 'error' | 'danger';
   title: string;
   message: string;
   timestamp: string;
   read: boolean;
+}
+
+export interface AlertConfig {
+  id: string;
+  symbol: string;
+  targetPrice: number;
+  condition: 'ABOVE' | 'BELOW';
+  createdAt: string;
+  isActive: boolean;
 }
 
 export type ViewState = 'dashboard' | 'holdings' | 'dividends' | 'analytics' | 'research' | 'community' | 'settings' | 'admin' | 'networth' | 'knowledge-base';

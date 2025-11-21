@@ -1,9 +1,8 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { BENCHMARK_DATA } from '../constants';
 import { usePortfolio } from '../context/PortfolioContext';
-import { Activity, Layers, Grid, Info, Percent, AlertTriangle, TrendingUp, Target, PieChart as PieChartIcon, ShieldCheck, Zap, Scale, Wallet } from 'lucide-react';
+import { Activity, Layers, Grid, Info, Percent, AlertTriangle, TrendingUp, Target, PieChart as PieChartIcon, ShieldCheck, Zap, Scale, Wallet, Calendar } from 'lucide-react';
 import SnowflakeChart from './SnowflakeChart';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
@@ -11,6 +10,7 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 const AnalyticsView: React.FC = () => {
   const { activePortfolio } = usePortfolio();
   const { holdings, totalValue } = activePortfolio;
+  const [benchmarkTimeframe, setBenchmarkTimeframe] = useState<'1M' | '6M' | '1Y' | 'YTD'>('1Y');
 
   // --- Aggregations & Calculations ---
 
@@ -144,6 +144,33 @@ const AnalyticsView: React.FC = () => {
       return acc + (val * ((h.expenseRatio || 0) / 100));
   }, 0) / totalValue) * 100 : 0;
 
+  // Dynamic Benchmark Data Generator
+  const getBenchmarkData = (timeframe: string) => {
+      const points = timeframe === '1M' ? 30 : timeframe === '6M' ? 26 : 12;
+      const labels = timeframe === '1M' ? Array.from({length: 30}, (_,i) => `Day ${i+1}`) :
+                     timeframe === '6M' ? Array.from({length: 26}, (_,i) => `Wk ${i+1}`) :
+                     ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      // Seed volatility based on timeframe
+      const vol = timeframe === '1M' ? 0.5 : timeframe === '6M' ? 1.5 : 2.5;
+      let pVal = 0, sVal = 0, nVal = 0;
+
+      return labels.map((label) => {
+          pVal += (Math.random() * vol * 2) - (vol * 0.8) + 0.5; // Slight upward bias
+          sVal += (Math.random() * vol * 1.5) - (vol * 0.6) + 0.3;
+          nVal += (Math.random() * vol * 2.5) - (vol * 1.0) + 0.4;
+          
+          return {
+              date: label,
+              portfolio: parseFloat(pVal.toFixed(2)),
+              sp500: parseFloat(sVal.toFixed(2)),
+              nasdaq: parseFloat(nVal.toFixed(2))
+          };
+      });
+  };
+
+  const benchmarkData = getBenchmarkData(benchmarkTimeframe);
+
   return (
     <div className="max-w-6xl mx-auto animate-fade-in space-y-8 pb-20">
       <div className="flex items-center justify-between">
@@ -220,7 +247,47 @@ const AnalyticsView: React.FC = () => {
           </div>
       </div>
 
-      {/* 2. INCOME & DIVIDEND ANALYSIS (NEW SECTION FROM PROMPT) */}
+      {/* 6. PAST PERFORMANCE (Enhanced) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <div className="flex flex-col md:flex-row items-center justify-between mb-6 gap-4">
+                <div>
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-brand-500" /> Benchmark Comparison
+                    </h3>
+                    <p className="text-sm text-slate-400">Compare your Time-Weighted Return against major indices.</p>
+                </div>
+                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+                    {['1M', '6M', 'YTD', '1Y'].map(tf => (
+                        <button
+                            key={tf}
+                            onClick={() => setBenchmarkTimeframe(tf as any)}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${benchmarkTimeframe === tf ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-white'}`}
+                        >
+                            {tf}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={benchmarkData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="date" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(val) => `${val}%`} tickLine={false} axisLine={false} />
+                        <RechartsTooltip 
+                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f1f5f9', borderRadius: '8px' }}
+                            formatter={(value: number) => [`${value}%`]}
+                        />
+                        <Legend verticalAlign="top" height={36} iconType="circle" />
+                        <Line type="monotone" dataKey="portfolio" name="My Portfolio" stroke="#6366f1" strokeWidth={3} dot={{r: 4}} />
+                        <Line type="monotone" dataKey="sp500" name="S&P 500" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                        <Line type="monotone" dataKey="nasdaq" name="NASDAQ-100" stroke="#94a3b8" strokeWidth={2} strokeDasharray="3 3" dot={false} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </div>
+      </div>
+
+      {/* 2. INCOME & DIVIDEND ANALYSIS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Yield Benchmarking */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -297,7 +364,7 @@ const AnalyticsView: React.FC = () => {
           </div>
       </div>
 
-      {/* 3. RISK PROFILE (NEW SECTION) */}
+      {/* 3. RISK PROFILE (Beta) */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                 <Zap className="w-5 h-5 text-amber-400" /> Risk Profile (Beta)
@@ -457,35 +524,6 @@ const AnalyticsView: React.FC = () => {
                    Well diversified across {new Set(holdings.map(h => h.sector)).size} sectors.
                </div>
           </div>
-      </div>
-
-      {/* 6. PAST PERFORMANCE */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-brand-500" /> Past Performance
-                </h3>
-                <div className="flex gap-2">
-                    <span className="text-xs text-slate-500">Time-Weighted Return</span>
-                </div>
-            </div>
-            <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={BENCHMARK_DATA}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                        <XAxis dataKey="date" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(val) => `${val}%`} tickLine={false} axisLine={false} />
-                        <RechartsTooltip 
-                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f1f5f9', borderRadius: '8px' }}
-                            formatter={(value: number) => [`${value}%`]}
-                        />
-                        <Legend />
-                        <Line type="monotone" dataKey="portfolio" name="My Portfolio" stroke="#6366f1" strokeWidth={3} dot={{r: 4}} />
-                        <Line type="monotone" dataKey="sp500" name="S&P 500" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                        <Line type="monotone" dataKey="nasdaq" name="NASDAQ-100" stroke="#94a3b8" strokeWidth={2} strokeDasharray="3 3" dot={false} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </div>
       </div>
 
       {/* 7. ADVANCED METRICS */}

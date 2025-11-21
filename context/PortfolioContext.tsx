@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
-import { Portfolio, Holding, PortfolioSummary, Transaction, Notification, ViewState, Watchlist, ManualAsset, Liability, AssetType } from '../types';
+import { Portfolio, Holding, PortfolioSummary, Transaction, Notification, ViewState, Watchlist, ManualAsset, Liability, AssetType, AlertConfig } from '../types';
 import { MOCK_MARKET_ASSETS, MOCK_PORTFOLIO, MOCK_PORTFOLIOS_LIST } from '../constants';
 import { useAuth } from './AuthContext';
 
@@ -36,6 +36,11 @@ interface PortfolioContextType {
   openAddAssetModal: (ticker?: string) => void;
   closeAddAssetModal: () => void;
 
+  // Alerts
+  alerts: AlertConfig[];
+  addAlert: (symbol: string, targetPrice: number, condition: 'ABOVE' | 'BELOW') => void;
+  removeAlert: (id: string) => void;
+
   // Market Simulation
   isMarketOpen: boolean;
   toggleMarketOpen: () => void;
@@ -69,6 +74,12 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>('');
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  
+  // Alerts State
+  const [alerts, setAlerts] = useState<AlertConfig[]>([
+      { id: 'a1', symbol: 'AAPL', targetPrice: 190, condition: 'ABOVE', createdAt: new Date().toISOString(), isActive: true },
+      { id: 'a2', symbol: 'TSLA', targetPrice: 200, condition: 'BELOW', createdAt: new Date().toISOString(), isActive: true }
+  ]);
 
   // Modal State
   const [isAddAssetModalOpen, setIsAddAssetModalOpen] = useState(false);
@@ -291,10 +302,31 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
                 totalValue: newTotal
             };
         });
+        
+        // Check Alerts
+        activePortfolio.holdings.forEach(h => {
+            alerts.forEach(alert => {
+                if (alert.isActive && alert.symbol === h.symbol) {
+                    if (alert.condition === 'ABOVE' && h.currentPrice >= alert.targetPrice) {
+                        // Trigger notification
+                        setNotifications(prev => {
+                            if (prev.find(n => n.title === `Alert: ${h.symbol}`)) return prev;
+                            return [{ id: Date.now().toString(), type: 'success', title: `Alert: ${h.symbol}`, message: `${h.symbol} reached target $${alert.targetPrice}`, timestamp: 'Just now', read: false }, ...prev];
+                        });
+                    } else if (alert.condition === 'BELOW' && h.currentPrice <= alert.targetPrice) {
+                         setNotifications(prev => {
+                            if (prev.find(n => n.title === `Alert: ${h.symbol}`)) return prev;
+                            return [{ id: Date.now().toString(), type: 'warning', title: `Alert: ${h.symbol}`, message: `${h.symbol} dropped below $${alert.targetPrice}`, timestamp: 'Just now', read: false }, ...prev];
+                        });
+                    }
+                }
+            });
+        });
+
     }, 3000); // Update every 3 seconds
 
     return () => clearInterval(interval);
-  }, [isMarketOpen, activePortfolio.holdings.length]);
+  }, [isMarketOpen, activePortfolio.holdings.length, alerts]);
 
   const fetchWatchlists = async () => {
       if (!user) return;
@@ -495,6 +527,24 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
   };
 
+  const addAlert = (symbol: string, targetPrice: number, condition: 'ABOVE' | 'BELOW') => {
+      const newAlert: AlertConfig = {
+          id: Date.now().toString(),
+          symbol,
+          targetPrice,
+          condition,
+          createdAt: new Date().toISOString(),
+          isActive: true
+      };
+      setAlerts(prev => [...prev, newAlert]);
+      const newNotif: Notification = { id: Date.now().toString(), type: 'success', title: 'Alert Created', message: `Notify when ${symbol} is ${condition} $${targetPrice}`, timestamp: 'Just now', read: false };
+      setNotifications(prev => [newNotif, ...prev]);
+  };
+
+  const removeAlert = (id: string) => {
+      setAlerts(prev => prev.filter(a => a.id !== id));
+  };
+
   // Helpers
   const switchPortfolio = (id: string) => setActivePortfolioId(id);
   const switchView = (view: ViewState) => setActiveView(view);
@@ -533,6 +583,9 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
       toggleWatchlist,
       createWatchlist,
       switchWatchlist,
+      alerts,
+      addAlert,
+      removeAlert,
       isMarketOpen,
       toggleMarketOpen
     }}>

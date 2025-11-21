@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Wallet, ArrowUpRight, Activity, Loader2, Sparkles, BarChart3, Layers, Bell, Gauge, AlertCircle, Newspaper, ExternalLink, Power, ArrowDownRight } from 'lucide-react';
+import { TrendingUp, Wallet, ArrowUpRight, Activity, Loader2, Sparkles, BarChart3, Layers, Bell, Gauge, AlertCircle, Newspaper, ExternalLink, Power, ArrowDownRight, Plus, BellRing, Trash2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { generatePortfolioInsight } from '../services/geminiService';
 import { usePortfolio } from '../context/PortfolioContext';
@@ -51,10 +51,14 @@ const StockTicker: React.FC<{ holdings: any[] }> = ({ holdings }) => {
 };
 
 const DashboardView: React.FC = () => {
-  const { activePortfolio, isMarketOpen, toggleMarketOpen } = usePortfolio();
+  const { activePortfolio, isMarketOpen, toggleMarketOpen, alerts, addAlert, removeAlert } = usePortfolio();
   const { theme } = useTheme();
   const [insight, setInsight] = useState<string | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
+  const [isAddingAlert, setIsAddingAlert] = useState(false);
+  const [newAlertSymbol, setNewAlertSymbol] = useState('');
+  const [newAlertPrice, setNewAlertPrice] = useState('');
+  const [newAlertCondition, setNewAlertCondition] = useState<'ABOVE' | 'BELOW'>('ABOVE');
 
   // Auto-generate insight on mount/update
   useEffect(() => {
@@ -94,6 +98,16 @@ const DashboardView: React.FC = () => {
 
   // Market Mood Data (Mock)
   const marketMood = 65; // 0-100 Greed
+
+  const handleCreateAlert = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (newAlertSymbol && newAlertPrice) {
+          addAlert(newAlertSymbol.toUpperCase(), parseFloat(newAlertPrice), newAlertCondition);
+          setIsAddingAlert(false);
+          setNewAlertSymbol('');
+          setNewAlertPrice('');
+      }
+  };
 
   return (
     <div className="max-w-6xl mx-auto animate-fade-in pb-10">
@@ -273,44 +287,80 @@ const DashboardView: React.FC = () => {
             </div>
         </div>
 
-        {/* Benchmarking */}
+        {/* Active Alerts Widget */}
         <div className="space-y-6">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm h-full">
-                <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-                     <Layers className="w-4 h-4" /> Performance vs Peers
-                </h3>
-                <div className="space-y-8">
-                    <div>
-                        <div className="flex justify-between text-sm mb-2">
-                            <span className="text-slate-700 dark:text-white font-bold">Your Portfolio</span>
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">+18.4%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3">
-                            <div className="bg-brand-600 h-3 rounded-full shadow-lg shadow-brand-600/20" style={{ width: '75%' }}></div>
-                        </div>
-                    </div>
-                    <div>
-                        <div className="flex justify-between text-sm mb-2">
-                            <span className="text-slate-500 dark:text-slate-400 font-medium">S&P 500</span>
-                            <span className="text-slate-700 dark:text-slate-300 font-bold">+14.2%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3">
-                            <div className="bg-slate-400 dark:bg-slate-600 h-3 rounded-full" style={{ width: '60%' }}></div>
-                        </div>
-                    </div>
-                    <div>
-                        <div className="flex justify-between text-sm mb-2">
-                            <span className="text-slate-500 dark:text-slate-400 font-medium">Top 10% of Users</span>
-                            <span className="text-slate-700 dark:text-slate-300 font-bold">+22.1%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3">
-                            <div className="bg-amber-400 dark:bg-amber-500/80 h-3 rounded-full shadow-lg shadow-amber-500/20" style={{ width: '85%' }}></div>
-                        </div>
-                    </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm h-full flex flex-col">
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-sm font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                        <BellRing className="w-4 h-4" /> Active Alerts
+                    </h3>
+                    <button 
+                        onClick={() => setIsAddingAlert(true)}
+                        className="text-xs bg-brand-600 text-white px-2 py-1 rounded-md hover:bg-brand-500 transition-colors flex items-center gap-1"
+                    >
+                        <Plus className="w-3 h-3" /> Add
+                    </button>
                 </div>
-                <div className="mt-8 p-4 bg-slate-50 dark:bg-slate-950/50 rounded-xl border border-slate-200 dark:border-slate-800/50 text-xs text-slate-500 leading-relaxed">
-                    You are outperforming 72% of investors this month. Your tech allocation is the primary driver of this alpha.
+
+                <div className="flex-1 space-y-3 overflow-y-auto max-h-[300px] pr-1">
+                    {alerts.length === 0 ? (
+                        <div className="text-center text-slate-500 text-xs py-8">No active alerts</div>
+                    ) : (
+                        alerts.map(alert => (
+                            <div key={alert.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950/50 rounded-xl border border-slate-200 dark:border-slate-800 group">
+                                <div>
+                                    <div className="font-bold text-slate-900 dark:text-white text-sm">{alert.symbol}</div>
+                                    <div className="text-xs text-slate-500">
+                                        Notify if {alert.condition.toLowerCase()} <span className="font-bold text-slate-700 dark:text-slate-300">${alert.targetPrice}</span>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => removeAlert(alert.id)}
+                                    className="text-slate-400 hover:text-red-500 transition-colors p-1"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ))
+                    )}
                 </div>
+
+                {isAddingAlert && (
+                    <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                        <form onSubmit={handleCreateAlert} className="space-y-2">
+                            <input 
+                                type="text" 
+                                placeholder="Symbol (e.g. AAPL)" 
+                                className="w-full bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-brand-500 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none"
+                                value={newAlertSymbol}
+                                onChange={e => setNewAlertSymbol(e.target.value.toUpperCase())}
+                                required
+                            />
+                            <div className="flex gap-2">
+                                <select 
+                                    className="bg-slate-100 dark:bg-slate-800 border border-transparent rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none"
+                                    value={newAlertCondition}
+                                    onChange={e => setNewAlertCondition(e.target.value as any)}
+                                >
+                                    <option value="ABOVE">Above</option>
+                                    <option value="BELOW">Below</option>
+                                </select>
+                                <input 
+                                    type="number" 
+                                    placeholder="Price" 
+                                    className="flex-1 bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-brand-500 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none"
+                                    value={newAlertPrice}
+                                    onChange={e => setNewAlertPrice(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="flex gap-2 mt-2">
+                                <button type="submit" className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold py-1.5 rounded transition-colors">Save</button>
+                                <button type="button" onClick={() => setIsAddingAlert(false)} className="flex-1 bg-slate-200 dark:bg-slate-800 text-slate-500 hover:text-white text-xs font-bold py-1.5 rounded transition-colors">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                )}
             </div>
         </div>
       </div>
