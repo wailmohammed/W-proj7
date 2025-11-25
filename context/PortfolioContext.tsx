@@ -69,15 +69,16 @@ const EMPTY_PORTFOLIO: Portfolio = {
   liabilities: []
 };
 
-// Helper to prevent NaN propagation and handle string inputs
+// Helper to prevent NaN propagation and handle string inputs robustly
 const safeFloat = (val: any): number => {
     if (val === null || val === undefined || val === '') return 0;
-    if (typeof val === 'number') return isFinite(val) ? val : 0;
+    if (typeof val === 'number') return (Number.isFinite(val) && !Number.isNaN(val)) ? val : 0;
     if (typeof val === 'string') {
-        // Remove currency symbols, commas, etc.
+        // Remove currency symbols, commas, spaces, etc. but keep decimal point and negative sign
         const cleaned = val.replace(/[^0-9.-]/g, '');
+        // Ensure we don't have multiple decimals
         const parsed = parseFloat(cleaned);
-        return isFinite(parsed) ? parsed : 0;
+        return (Number.isFinite(parsed) && !Number.isNaN(parsed)) ? parsed : 0;
     }
     return 0;
 };
@@ -354,13 +355,18 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
 
             const calculatedTotalValue = mappedHoldings.reduce((sum, h) => {
                 const val = h.shares * h.currentPrice;
-                return sum + (isFinite(val) ? val : 0);
+                // Ensure we only add valid finite numbers
+                const safeVal = (Number.isFinite(val) && !Number.isNaN(val)) ? val : 0;
+                return sum + safeVal;
             }, 0);
+
+            // Double check total value is not NaN/Infinity
+            const safeTotalValue = (Number.isFinite(calculatedTotalValue) && !Number.isNaN(calculatedTotalValue)) ? calculatedTotalValue : 0;
 
             const fullPortfolio: Portfolio = {
                 id: portData.id,
                 name: portData.name,
-                totalValue: safeFloat(calculatedTotalValue), // Ensure Total Value is never NaN
+                totalValue: safeTotalValue, 
                 cashBalance: safeFloat(portData.cash_balance),
                 holdings: mappedHoldings,
                 transactions: mappedTx,
@@ -436,14 +442,16 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
 
         const newTotal = updates.reduce((acc, h) => {
             const val = h.shares * h.currentPrice;
-            return acc + (isFinite(val) ? val : 0);
+            return acc + (Number.isFinite(val) ? val : 0);
         }, 0);
         
+        const safeNewTotal = Number.isFinite(newTotal) ? newTotal : 0;
+
         // Update State but NO DB Write on ticks to prevent spam
         setActivePortfolio(prev => ({
             ...prev,
             holdings: updates,
-            totalValue: safeFloat(newTotal)
+            totalValue: safeNewTotal
         }));
 
     }, 5000);
@@ -451,7 +459,6 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
     return () => clearInterval(interval);
   }, [isMarketOpen, activePortfolio.holdings.length, alerts, marketDataApiKey]);
 
-  // ... (Rest of the component remains unchanged) ...
   // --- Function to Add New Portfolio ---
   const addNewPortfolio = async (name: string, type: 'Stock' | 'Crypto' | 'Mixed'): Promise<string | null> => {
     let finalId = `local-${Date.now()}`;
@@ -729,10 +736,14 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
               } as any);
           }
           
+          // Recalculate total value locally
+          const newTotalValue = updatedHoldings.reduce((sum, h) => sum + (h.shares * h.currentPrice), 0);
+
           const updatedPortfolio = {
               ...activePortfolio,
               transactions: [newTx, ...activePortfolio.transactions],
-              holdings: updatedHoldings
+              holdings: updatedHoldings,
+              totalValue: safeFloat(newTotalValue)
           };
 
           setActivePortfolio(updatedPortfolio);
@@ -804,9 +815,6 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
   };
 
-  // ... rest of the context methods (updateHolding, deleteHolding, etc.)
-  // Assuming they are copied correctly as is, just ensuring imports and closures are fine.
-  
   const updateHolding = async (holdingId: string, updates: Partial<Holding>) => {
       // 1. Local Optimistic Update
       const updatedHoldings = activePortfolio.holdings.map(h => 
@@ -923,50 +931,81 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
           }
       }
   };
-  
-  const createWatchlist = async (name: string) => {
-      const newId = Math.random().toString(36).substr(2, 9);
-      setWatchlists(prev => [...prev, { id: newId, name, symbols: [] }]);
-      setActiveWatchlistId(newId);
+
+  const syncBroker = async (brokerId: string) => {
+      console.log(`Syncing broker ${brokerId}...`);
+      if (!user) return false;
+      
+      try {
+          const integration = integrations.find(i => i.id === brokerId);
+          if (!integration || !integration.apiCredentials) return false;
+
+          if (integration.name === 'Trading 212') {
+              const positions = await fetchTrading212Positions(integration.apiCredentials.apiKey);
+              
+              // Auto-map to transactions for importPortfolio
+              if (positions.length > 0) {
+                  const transactions = positions.map(p => ({
+                      date: new Date().toISOString().split('T')[0],
+                      type: 'BUY', // Assuming current positions are long
+                      symbol: p.ticker.split('_')[0],
+                      shares: p.quantity,
+                      price: p.averagePrice
+                  }));
+                  
+                  await importPortfolio('T212 Auto Sync', transactions);
+                  return true;
+              }
+          }
+      } catch (e) {
+          console.error("Sync failed", e);
+      }
+      
+      return false;
   };
 
-  const toggleWatchlist = async (symbol: string) => {
+  // Other Context Methods
+  const switchPortfolio = (id: string) => setActivePortfolioId(id);
+  const switchView = (view: ViewState) => setActiveView(view);
+  
+  const viewStock = (symbol: string) => {
+      setSelectedResearchSymbol(symbol);
+      setActiveView('research');
+  };
+
+  const toggleWatchlist = (symbol: string) => {
       setWatchlists(prev => prev.map(w => {
-          const targetId = activeWatchlistId || prev[0]?.id;
-          if (w.id === targetId) {
-              const exists = w.symbols.includes(symbol);
-              return {
-                  ...w,
-                  symbols: exists ? w.symbols.filter(s => s !== symbol) : [...w.symbols, symbol]
-              };
+          if (w.id === activeWatchlistId) {
+              if (w.symbols.includes(symbol)) {
+                  return { ...w, symbols: w.symbols.filter(s => s !== symbol) };
+              } else {
+                  return { ...w, symbols: [...w.symbols, symbol] };
+              }
           }
           return w;
       }));
   };
 
-  const syncBroker = async (brokerId: string): Promise<boolean> => {
-      const positions = await fetchTrading212Positions(marketDataApiKey);
-      
-      if (positions.length > 0) {
-          const transactions = positions.map(p => {
-              let symbol = p.ticker || 'UNKNOWN';
-              if (symbol.includes('_')) symbol = symbol.split('_')[0];
-              
-              return {
-                  date: new Date().toISOString().split('T')[0],
-                  type: 'BUY', 
-                  symbol: symbol,
-                  name: symbol, 
-                  shares: safeFloat(p.quantity),
-                  price: safeFloat(p.averagePrice),
-              };
-          });
-          
-          await importPortfolio(`Sync ${new Date().toLocaleDateString()}`, transactions);
-          return true;
-      }
-      return false;
+  const createWatchlist = (name: string) => {
+      const newId = `wl-${Date.now()}`;
+      setWatchlists(prev => [...prev, { id: newId, name, symbols: [] }]);
+      setActiveWatchlistId(newId);
   };
+
+  const switchWatchlist = (id: string) => setActiveWatchlistId(id);
+
+  const openAddAssetModal = (ticker?: string) => {
+      setPreSelectedAssetTicker(ticker || null);
+      setIsAddAssetModalOpen(true);
+  };
+  
+  const closeAddAssetModal = () => {
+      setIsAddAssetModalOpen(false);
+      setPreSelectedAssetTicker(null);
+  };
+
+  const markAsRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  const clearNotifications = () => setNotifications([]);
 
   const addAlert = async (symbol: string, targetPrice: number, condition: 'ABOVE' | 'BELOW') => {
       const newAlert: AlertConfig = {
@@ -974,25 +1013,29 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
           symbol,
           targetPrice,
           condition,
-          isActive: true,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          isActive: true
       };
       setAlerts(prev => [...prev, newAlert]);
-  };
-  
-  const removeAlert = async (id: string) => {
-      setAlerts(prev => prev.filter(a => a.id !== id));
+
+      if (isSupabaseConfigured && user) {
+          await supabase.from('alerts').insert({
+              user_id: user.id,
+              symbol,
+              target_price: targetPrice,
+              condition
+          });
+      }
   };
 
-  const switchPortfolio = (id: string) => setActivePortfolioId(id);
-  const switchView = (view: ViewState) => setActiveView(view);
-  const viewStock = (symbol: string) => { setSelectedResearchSymbol(symbol); setActiveView('research'); };
-  const markAsRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const clearNotifications = () => setNotifications([]);
-  const openAddAssetModal = (ticker?: string) => { setPreSelectedAssetTicker(ticker || null); setIsAddAssetModalOpen(true); };
-  const closeAddAssetModal = () => { setIsAddAssetModalOpen(false); setPreSelectedAssetTicker(null); };
-  const switchWatchlist = (id: string) => setActiveWatchlistId(id);
-  const toggleMarketOpen = () => setIsMarketOpen(prev => !prev);
+  const removeAlert = async (id: string) => {
+      setAlerts(prev => prev.filter(a => a.id !== id));
+      if (isSupabaseConfigured && user) {
+          await supabase.from('alerts').delete().eq('id', id);
+      }
+  };
+
+  const toggleMarketOpen = () => setIsMarketOpen(!isMarketOpen);
 
   return (
     <PortfolioContext.Provider value={{
@@ -1009,6 +1052,11 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
       deleteHolding,
       addManualAsset,
       addLiability,
+      watchlists,
+      activeWatchlistId,
+      toggleWatchlist,
+      createWatchlist,
+      switchWatchlist,
       activeView,
       switchView,
       selectedResearchSymbol,
@@ -1020,11 +1068,6 @@ export const PortfolioProvider: React.FC<{ children: ReactNode }> = ({ children 
       preSelectedAssetTicker,
       openAddAssetModal,
       closeAddAssetModal,
-      watchlists,
-      activeWatchlistId,
-      toggleWatchlist,
-      createWatchlist,
-      switchWatchlist,
       alerts,
       addAlert,
       removeAlert,

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Wallet, ArrowUpRight, Activity, Loader2, Sparkles, BarChart3, Layers, Bell, Gauge, AlertCircle, Newspaper, ExternalLink, Power, ArrowDownRight, Plus, BellRing, Trash2, Settings, Zap, Megaphone, DollarSign } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { TrendingUp, Wallet, ArrowUpRight, Activity, Loader2, Sparkles, BarChart3, Gauge, AlertCircle, Newspaper, ExternalLink, Power, ArrowDownRight, Plus, Trash2, Zap, Megaphone, Bell } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { generatePortfolioInsight } from '../services/geminiService';
 import { usePortfolio } from '../context/PortfolioContext';
 import { useTheme } from '../context/ThemeContext';
@@ -81,30 +81,42 @@ const DashboardView: React.FC = () => {
   }
   
   const portfolioBeta = activePortfolio.totalValue > 0 
-    ? activePortfolio.holdings.reduce((acc: number, h) => acc + (calculateBeta(h.sector, String(h.assetType)) * ((h.shares * h.currentPrice)/activePortfolio.totalValue)), 0)
+    ? activePortfolio.holdings.reduce((acc: number, h) => {
+        const val = Number(h.shares) * Number(h.currentPrice);
+        const weight = val / Number(activePortfolio.totalValue);
+        const beta = calculateBeta(h.sector || 'Unknown', String(h.assetType));
+        return acc + (beta * weight);
+    }, 0)
     : 1.0;
 
   const portfolioYield = activePortfolio.totalValue > 0 
-    ? (activePortfolio.holdings.reduce((acc: number, h) => acc + (h.shares * h.currentPrice * (h.dividendYield/100)), 0) / activePortfolio.totalValue) * 100 
+    ? (activePortfolio.holdings.reduce((acc: number, h) => {
+        const val = Number(h.shares) * Number(h.currentPrice);
+        const income = val * (Number(h.dividendYield || 0) / 100);
+        return acc + income;
+    }, 0) / Number(activePortfolio.totalValue)) * 100 
     : 0;
 
-  // Detailed AI Data Prep
+  // Detailed AI Data Prep - Use explicit typing for reduce
   const sectorWeights = activePortfolio.holdings.reduce((acc: Record<string, number>, h) => {
-      const val = h.shares * h.currentPrice;
-      acc[h.sector] = (acc[h.sector] || 0) + val;
+      const val = Number(h.shares) * Number(h.currentPrice);
+      const sector = h.sector || 'Unknown';
+      const current = acc[sector] || 0;
+      acc[sector] = current + val;
       return acc;
   }, {} as Record<string, number>);
 
   const sectorWeightsFormatted: Record<string, string> = {};
   Object.entries(sectorWeights).forEach(([k, v]) => {
-      if (activePortfolio.totalValue > 0) {
-          sectorWeightsFormatted[k] = `${((v / activePortfolio.totalValue) * 100).toFixed(1)}%`;
+      const total = Number(activePortfolio.totalValue);
+      if (total > 0) {
+          sectorWeightsFormatted[k] = `${((Number(v) / total) * 100).toFixed(1)}%`;
       }
   });
 
-  const totalCostBasis = activePortfolio.holdings.reduce((acc: number, h) => acc + (h.shares * h.avgPrice), 0);
+  const totalCostBasis = activePortfolio.holdings.reduce((acc: number, h) => acc + (Number(h.shares) * Number(h.avgPrice)), 0);
   const costBasisSummary = activePortfolio.totalValue > 0 
-      ? `Total Cost: $${totalCostBasis.toLocaleString()}, Unrealized P/L: $${(activePortfolio.totalValue - totalCostBasis).toLocaleString()}` 
+      ? `Total Cost: $${totalCostBasis.toLocaleString()}, Unrealized P/L: $${(Number(activePortfolio.totalValue) - totalCostBasis).toLocaleString()}` 
       : "No holdings";
 
   const recentTx = (activePortfolio.transactions || []).slice(0, 3).map(t => `${t.type} ${t.shares} ${t.symbol} @ $${t.price}`);
@@ -128,17 +140,17 @@ const DashboardView: React.FC = () => {
     } else {
         setInsight("Add assets to your portfolio to see AI insights.");
     }
-  }, [activePortfolio.id, activePortfolio.holdings.length]); // Dependencies reduced to avoid loops on derived values
+  }, [activePortfolio.id, activePortfolio.holdings.length]); 
 
   // Calculate total dividend income dynamically
   const annualDividendIncome = activePortfolio.holdings.reduce((acc, h) => {
-      return acc + (h.shares * h.currentPrice * (h.dividendYield / 100));
+      return acc + (Number(h.shares) * Number(h.currentPrice) * (Number(h.dividendYield || 0) / 100));
   }, 0);
 
   // Snowball Analytics Style: Compound Projection Data
   const projectionData = Array.from({ length: 15 }, (_, i) => {
       const year = new Date().getFullYear() + i;
-      const initialVal = activePortfolio.totalValue;
+      const initialVal = Number(activePortfolio.totalValue);
       const contributions = initialVal + (12000 * i); // Mock $1k/mo
       const growthRate = 0.08;
       const value = contributions * Math.pow(1 + growthRate, i);
@@ -272,7 +284,7 @@ const DashboardView: React.FC = () => {
           </div>
           <div className="text-slate-500 dark:text-slate-400 text-sm mb-1 font-medium">Net Worth</div>
           <div className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-all duration-500">
-              ${(activePortfolio.totalValue + activePortfolio.cashBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${(Number(activePortfolio.totalValue) + Number(activePortfolio.cashBalance)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-emerald-500 dark:text-emerald-400 text-xs font-bold flex items-center gap-1 mt-3 bg-emerald-50 dark:bg-emerald-400/10 w-fit px-2 py-1 rounded-full">
             <TrendingUp className="w-3 h-3" /> +$2,430.50 (2.4%)
@@ -281,7 +293,7 @@ const DashboardView: React.FC = () => {
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm hover:shadow-md transition-all relative overflow-hidden">
           <div className="text-slate-500 dark:text-slate-400 text-sm mb-1 font-medium">Cash Balance</div>
-          <div className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">${activePortfolio.cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+          <div className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">${Number(activePortfolio.cashBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           <div className="text-slate-500 text-xs mt-3 flex items-center gap-1">
              <AlertCircle className="w-3 h-3" /> Available to deploy
           </div>
@@ -290,7 +302,7 @@ const DashboardView: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm hover:shadow-md transition-all relative overflow-hidden">
            <div className="text-slate-500 dark:text-slate-400 text-sm mb-1 font-medium">Annual Income</div>
            <div className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-all duration-500">
-               ${annualDividendIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+               ${Number(annualDividendIncome).toLocaleString(undefined, { minimumFractionDigits: 2 })}
            </div>
            <div className="text-brand-600 dark:text-brand-400 text-xs font-bold flex items-center gap-1 mt-3 bg-brand-50 dark:bg-brand-400/10 w-fit px-2 py-1 rounded-full">
             <ArrowUpRight className="w-3 h-3" /> +12% YoY

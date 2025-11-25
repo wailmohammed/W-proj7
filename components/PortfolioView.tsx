@@ -9,6 +9,73 @@ import { convertToUSD } from '../services/marketData';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+// Moved CustomContent outside to prevent re-creation on render
+const CustomizedContent = (props: any) => {
+    const { x, y, width, height, index, payload, name, size, totalValue } = props;
+    
+    // Robust dimension check
+    if (
+        !payload ||
+        typeof x !== 'number' || 
+        typeof y !== 'number' || 
+        typeof width !== 'number' || 
+        typeof height !== 'number' ||
+        isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height) ||
+        width <= 0 || height <= 0
+    ) {
+        return <g />; 
+    }
+
+    const fill = payload?.fill || COLORS[(index || 0) % COLORS.length] || '#8884d8';
+    
+    // Calculation with finite check
+    const percent = (totalValue > 0 && Number.isFinite(size)) ? (size / totalValue) * 100 : 0;
+    const percentStr = Number.isFinite(percent) ? `${percent.toFixed(1)}%` : '0%';
+
+    return (
+      <g>
+        <rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          style={{
+            fill: fill,
+            stroke: '#fff',
+            strokeWidth: 2,
+            strokeOpacity: 0.3,
+          }}
+        />
+        {width > 50 && height > 30 && name && (
+          <text
+            x={x + width / 2}
+            y={y + height / 2}
+            textAnchor="middle"
+            fill="#fff"
+            fontSize={12}
+            fontWeight="bold"
+            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)', pointerEvents: 'none' }}
+          >
+            {name}
+          </text>
+        )}
+        {width > 50 && height > 50 && (
+           <text
+            x={x + width / 2}
+            y={y + height / 2 + 14}
+            textAnchor="middle"
+            fill="#fff"
+            fontSize={10}
+            fillOpacity={0.9}
+            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)', pointerEvents: 'none' }}
+          >
+            {percentStr}
+          </text>
+        )}
+      </g>
+    );
+};
+
 const PortfolioView: React.FC = () => {
   const { activePortfolio, viewStock, openAddAssetModal, updateHolding, deleteHolding } = usePortfolio();
   const [viewMode, setViewMode] = useState<'allocation' | 'holdings' | 'transactions' | 'performance' | 'rebalancing'>('allocation');
@@ -115,6 +182,7 @@ const PortfolioView: React.FC = () => {
     
     activePortfolio.holdings.forEach(h => {
         const val = (h.shares || 0) * (h.currentPrice || 0);
+        // Ensure we don't divide by zero
         const weight = (val > 0 && activePortfolio.totalValue > 0) ? val / activePortfolio.totalValue : 0;
         const sf = h.snowflake || { value: 0, future: 0, past: 0, health: 0, dividend: 0, total: 0 };
         
@@ -160,7 +228,7 @@ const PortfolioView: React.FC = () => {
   const prepareChartData = (map: Map<string, number>) => {
       return Array.from(map.entries())
           .map(([name, value]) => ({ name, value }))
-          .filter(item => item.value > 0.01 && isFinite(item.value)) // Robust filter
+          .filter(item => item.value > 0.01 && Number.isFinite(item.value)) // Robust filter for Recharts
           .sort((a, b) => b.value - a.value);
   };
 
@@ -277,75 +345,6 @@ const PortfolioView: React.FC = () => {
       }
   };
 
-  // Custom Content for Treemap (Robust Version)
-  const CustomizedContent = (props: any) => {
-    // Safety Check for rendering logic to prevent white page
-    if (!props || !props.payload) return null;
-
-    const { x, y, width, height, index, payload, name, size } = props;
-    
-    if (
-        typeof x !== 'number' || 
-        typeof y !== 'number' || 
-        typeof width !== 'number' || 
-        typeof height !== 'number' ||
-        isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height) ||
-        width <= 0 || height <= 0 // Prevent negative or zero dimensions
-    ) {
-        return <g />;
-    }
-
-    const fill = payload.fill || COLORS[index % COLORS.length] || '#8884d8';
-    
-    // Prevent NaN percent by checking totalValue and valid size
-    const total = activePortfolio?.totalValue || 0;
-    const percent = (total > 0 && size && isFinite(size)) ? (size / total) * 100 : 0;
-    const percentStr = isFinite(percent) ? `${percent.toFixed(1)}%` : '0%';
-
-    return (
-      <g>
-        <rect
-          x={x}
-          y={y}
-          width={width}
-          height={height}
-          style={{
-            fill: fill,
-            stroke: '#fff',
-            strokeWidth: 2,
-            strokeOpacity: 0.3,
-          }}
-        />
-        {width > 50 && height > 30 && name && (
-          <text
-            x={x + width / 2}
-            y={y + height / 2}
-            textAnchor="middle"
-            fill="#fff"
-            fontSize={12}
-            fontWeight="bold"
-            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)', pointerEvents: 'none' }}
-          >
-            {name}
-          </text>
-        )}
-        {width > 50 && height > 50 && (
-           <text
-            x={x + width / 2}
-            y={y + height / 2 + 14}
-            textAnchor="middle"
-            fill="#fff"
-            fontSize={10}
-            fillOpacity={0.9}
-            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)', pointerEvents: 'none' }}
-          >
-            {percentStr}
-          </text>
-        )}
-      </g>
-    );
-  };
-
   if (!activePortfolio) return <div className="p-12 text-center text-slate-500">Loading portfolio data...</div>;
 
   if (holdings.length === 0 && transactions.length === 0 && manualAssets.length === 0) {
@@ -460,7 +459,7 @@ const PortfolioView: React.FC = () => {
                                 <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
                                 <span className="text-slate-600 dark:text-slate-300 truncate">{entry.name}</span>
                                 <span className="text-slate-500 ml-auto">
-                                    {activePortfolio.totalValue > 0 && isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
+                                    {activePortfolio.totalValue > 0 && Number.isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
                                 </span>
                             </div>
                         ))}
@@ -502,7 +501,7 @@ const PortfolioView: React.FC = () => {
                                 <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[(index + 3) % COLORS.length] }}></div>
                                 <span className="text-slate-600 dark:text-slate-300 truncate">{entry.name}</span>
                                 <span className="text-slate-500 ml-auto">
-                                    {activePortfolio.totalValue > 0 && isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
+                                    {activePortfolio.totalValue > 0 && Number.isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
                                 </span>
                             </div>
                         ))}
@@ -544,7 +543,7 @@ const PortfolioView: React.FC = () => {
                                 <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[(index + 5) % COLORS.length] }}></div>
                                 <span className="text-slate-600 dark:text-slate-300 truncate">{entry.name}</span>
                                 <span className="text-slate-500 ml-auto">
-                                    {activePortfolio.totalValue > 0 && isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
+                                    {activePortfolio.totalValue > 0 && Number.isFinite(entry.value) ? Math.round((entry.value / activePortfolio.totalValue) * 100) : 0}%
                                 </span>
                             </div>
                         ))}
@@ -565,7 +564,7 @@ const PortfolioView: React.FC = () => {
                                 dataKey="size"
                                 aspectRatio={4 / 3}
                                 stroke="#fff"
-                                content={<CustomizedContent />}
+                                content={<CustomizedContent totalValue={activePortfolio.totalValue} />}
                             >
                                 <RechartsTooltip 
                                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f1f5f9', borderRadius: '8px' }}

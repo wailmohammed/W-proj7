@@ -7,67 +7,31 @@ import SnowflakeChart from './SnowflakeChart';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
-const AnalyticsView: React.FC = () => {
-  const { activePortfolio } = usePortfolio();
-  const { holdings, totalValue } = activePortfolio;
-  const [benchmarkTimeframe, setBenchmarkTimeframe] = useState<'1M' | '6M' | '1Y' | 'YTD' | 'ALL'>('1Y');
-  const [selectedBenchmark, setSelectedBenchmark] = useState<'sp500' | 'nasdaq' | 'btc'>('sp500');
-  
-  // Stock Comparison State
-  const [selectedComparisonAssets, setSelectedComparisonAssets] = useState<string[]>(
-      holdings.slice(0, 3).map(h => h.symbol) // Default to top 3 holdings
-  );
-
-  // --- Aggregations & Calculations ---
-
-  // 1. Portfolio Snowflake (Weighted Average)
-  const portfolioSnowflake = useMemo(() => {
-    if (totalValue === 0) return { value: 0, future: 0, past: 0, health: 0, dividend: 0, total: 0 };
+// Moved outside component to prevent re-render loop
+const CustomizedTreemapContent = (props: any) => {
+    const { x, y, width, height, payload, index, totalValue } = props;
     
-    const acc = { value: 0, future: 0, past: 0, health: 0, dividend: 0, total: 0 };
-    holdings.forEach(h => {
-        const weight = (h.shares * h.currentPrice) / totalValue;
-        acc.value += h.snowflake.value * weight;
-        acc.future += h.snowflake.future * weight;
-        acc.past += h.snowflake.past * weight;
-        acc.health += h.snowflake.health * weight;
-        acc.dividend += h.snowflake.dividend * weight;
-        acc.total += h.snowflake.total * weight;
-    });
-    
-    return {
-        value: Number(acc.value.toFixed(1)),
-        future: Number(acc.future.toFixed(1)),
-        past: Number(acc.past.toFixed(1)),
-        health: Number(acc.health.toFixed(1)),
-        dividend: Number(acc.dividend.toFixed(1)),
-        total: Math.round(acc.total)
-    };
-  }, [totalValue, holdings]);
+    // Defensive check for invalid dimensions and payload
+    if (
+        !payload ||
+        typeof x !== 'number' || 
+        typeof y !== 'number' || 
+        typeof width !== 'number' || 
+        typeof height !== 'number' ||
+        isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height) ||
+        width <= 0 || height <= 0
+    ) {
+        return <g />; 
+    }
 
-  // 2. Treemap Data (Sector Allocation)
-  const treemapData = useMemo(() => {
-      const sectorMap = new Map<string, number>();
-      holdings.forEach(h => {
-          const val = h.shares * h.currentPrice;
-          sectorMap.set(h.sector, (sectorMap.get(h.sector) || 0) + val);
-      });
-      
-      return Array.from(sectorMap.entries())
-          .map(([name, value], index) => ({
-              name,
-              size: value,
-              fill: COLORS[index % COLORS.length]
-          }))
-          .sort((a, b) => b.size - a.size);
-  }, [holdings]);
-
-  // Custom Content for Treemap
-  const CustomizedTreemapContent = (props: any) => {
-    const { x, y, width, height, payload, index } = props;
     const name = payload?.name;
     const size = payload?.size;
+    const fill = payload?.fill || COLORS[(index || 0) % COLORS.length] || '#333'; // Safe fill
     
+    // Safe Percentage Calc
+    const percent = (totalValue > 0 && Number.isFinite(size)) ? (size / totalValue) * 100 : 0;
+    const percentStr = Number.isFinite(percent) ? `${percent.toFixed(1)}%` : '0%';
+
     return (
       <g>
         <rect
@@ -76,7 +40,7 @@ const AnalyticsView: React.FC = () => {
           width={width}
           height={height}
           style={{
-            fill: payload?.fill || COLORS[index % COLORS.length] || '#333',
+            fill: fill,
             stroke: '#fff',
             strokeWidth: 2,
             strokeOpacity: 0.3,
@@ -95,7 +59,7 @@ const AnalyticsView: React.FC = () => {
             {name}
           </text>
         )}
-        {width > 60 && height > 50 && totalValue > 0 && (
+        {width > 60 && height > 50 && (
            <text
             x={x + width / 2}
             y={y + height / 2 + 12}
@@ -105,18 +69,79 @@ const AnalyticsView: React.FC = () => {
             fillOpacity={0.9}
             style={{ pointerEvents: 'none', textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}
           >
-            {((size / totalValue) * 100).toFixed(1)}%
+            {percentStr}
           </text>
         )}
       </g>
     );
-  };
+};
+
+const AnalyticsView: React.FC = () => {
+  const { activePortfolio } = usePortfolio();
+  const { holdings, totalValue } = activePortfolio;
+  const [benchmarkTimeframe, setBenchmarkTimeframe] = useState<'1M' | '6M' | '1Y' | 'YTD' | 'ALL'>('1Y');
+  const [selectedBenchmark, setSelectedBenchmark] = useState<'sp500' | 'nasdaq' | 'btc'>('sp500');
+  
+  // Stock Comparison State
+  const [selectedComparisonAssets, setSelectedComparisonAssets] = useState<string[]>(
+      holdings.slice(0, 3).map(h => h.symbol) // Default to top 3 holdings
+  );
+
+  // --- Aggregations & Calculations ---
+
+  // 1. Portfolio Snowflake (Weighted Average)
+  const portfolioSnowflake = useMemo(() => {
+    if (!totalValue || totalValue <= 0) return { value: 0, future: 0, past: 0, health: 0, dividend: 0, total: 0 };
+    
+    const acc = { value: 0, future: 0, past: 0, health: 0, dividend: 0, total: 0 };
+    holdings.forEach(h => {
+        const val = h.shares * h.currentPrice;
+        if (val > 0) {
+            const weight = val / totalValue;
+            acc.value += (h.snowflake?.value || 0) * weight;
+            acc.future += (h.snowflake?.future || 0) * weight;
+            acc.past += (h.snowflake?.past || 0) * weight;
+            acc.health += (h.snowflake?.health || 0) * weight;
+            acc.dividend += (h.snowflake?.dividend || 0) * weight;
+            acc.total += (h.snowflake?.total || 0) * weight;
+        }
+    });
+    
+    return {
+        value: Number(acc.value.toFixed(1)),
+        future: Number(acc.future.toFixed(1)),
+        past: Number(acc.past.toFixed(1)),
+        health: Number(acc.health.toFixed(1)),
+        dividend: Number(acc.dividend.toFixed(1)),
+        total: Math.round(acc.total)
+    };
+  }, [totalValue, holdings]);
+
+  // 2. Treemap Data (Sector Allocation)
+  const treemapData = useMemo(() => {
+      const sectorMap = new Map<string, number>();
+      holdings.forEach(h => {
+          const val = h.shares * h.currentPrice;
+          if (Number.isFinite(val) && val > 0) {
+             sectorMap.set(h.sector, (sectorMap.get(h.sector) || 0) + val);
+          }
+      });
+      
+      return Array.from(sectorMap.entries())
+          .map(([name, value], index) => ({
+              name,
+              size: value,
+              fill: COLORS[index % COLORS.length]
+          }))
+          .filter(item => item.size > 0)
+          .sort((a, b) => b.size - a.size);
+  }, [holdings]);
 
   // 5. Income Analytics (SWS Style)
   const portfolioYield = useMemo(() => {
-      return totalValue > 0 
-        ? (holdings.reduce((acc, h) => acc + (h.shares * h.currentPrice * (h.dividendYield/100)), 0) / totalValue) * 100 
-        : 0;
+      if (!totalValue || totalValue <= 0) return 0;
+      const weightedYield = holdings.reduce((acc, h) => acc + (h.shares * h.currentPrice * (h.dividendYield/100)), 0) / totalValue * 100;
+      return Number.isFinite(weightedYield) ? weightedYield : 0;
   }, [totalValue, holdings]);
 
   const yieldComparisonData = [
@@ -127,17 +152,18 @@ const AnalyticsView: React.FC = () => {
 
   // Mock Payout Ratio (Weighted)
   const weightedPayoutRatio = useMemo(() => {
-      return totalValue > 0 
-        ? holdings.reduce((acc, h) => {
+      if (!totalValue || totalValue <= 0) return 0;
+      const ratio = holdings.reduce((acc, h) => {
             let pr = 45; 
             if(h.dividendYield > 5) pr = 92;
             else if(h.dividendYield > 3) pr = 65;
             else if(h.dividendYield > 1) pr = 25;
             else pr = 0;
             
-            return acc + (pr * ((h.shares * h.currentPrice)/totalValue));
-        }, 0)
-        : 0;
+            const val = h.shares * h.currentPrice;
+            return acc + (pr * (val/totalValue));
+        }, 0);
+      return Number.isFinite(ratio) ? ratio : 0;
   }, [totalValue, holdings]);
 
   // 7. Correlation Matrix (Simulated)
@@ -429,20 +455,26 @@ const AnalyticsView: React.FC = () => {
               <LayoutGrid className="w-5 h-5 text-indigo-500" /> Sector Allocation Map
           </h3>
           <div className="h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                  <Treemap
-                      data={treemapData}
-                      dataKey="size"
-                      aspectRatio={4 / 3}
-                      stroke="#fff"
-                      content={<CustomizedTreemapContent />}
-                  >
-                      <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f1f5f9', borderRadius: '8px' }}
-                          formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']}
-                      />
-                  </Treemap>
-              </ResponsiveContainer>
+              {treemapData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                      <Treemap
+                          data={treemapData}
+                          dataKey="size"
+                          aspectRatio={4 / 3}
+                          stroke="#fff"
+                          content={<CustomizedTreemapContent totalValue={activePortfolio.totalValue} />}
+                      >
+                          <RechartsTooltip 
+                              contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f1f5f9', borderRadius: '8px' }}
+                              formatter={(value: number) => [`$${value.toLocaleString()}`, 'Value']}
+                          />
+                      </Treemap>
+                  </ResponsiveContainer>
+              ) : (
+                  <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                      Add assets with value to see allocation.
+                  </div>
+              )}
           </div>
       </div>
 
