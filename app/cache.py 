@@ -1,0 +1,33 @@
+# cache.py
+import redis
+import json
+import os
+from functools import wraps
+from typing import Callable, Any
+from dotenv import load_dotenv
+
+load_dotenv()
+
+try:
+    r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+    r.ping()  # Test connection
+    CACHING_ENABLED = True
+except:
+    CACHING_ENABLED = False
+    print("Redis unavailable – using in-memory fallback")
+
+def cache(ttl: int):
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            if not CACHING_ENABLED:
+                return func(*args, **kwargs)
+            key = f"{func.__name__}:{args}:{json.dumps(kwargs, sort_keys=True)}"
+            cached = r.get(key)
+            if cached:
+                return json.loads(cached)
+            result = func(*args, **kwargs)
+            r.setex(key, ttl, json.dumps(result))
+            return result
+        return wrapper
+    return decorator

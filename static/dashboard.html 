@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>W-proj7 Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Stock & Dividend Tracker</h1>
+    <input type="text" id="ticker" placeholder="Enter ticker (e.g., AAPL)" value="AAPL">
+    <button onclick="loadData()">Load</button>
+    <div id="price"></div>
+    <canvas id="chart" width="400" height="200"></canvas>
+    <div id="dividends"></div>
+
+    <script>
+        async function loadData() {
+            const ticker = document.getElementById('ticker').value.toUpperCase();
+            // Fetch price
+            const priceRes = await fetch(`/api/price/${ticker}`);
+            const price = await priceRes.json();
+            document.getElementById('price').innerHTML = `<h2>${ticker}: $${price.price} (${price.source})</h2>`;
+
+            // Fetch historical & chart
+            const histRes = await fetch(`/api/historical/${ticker}?days=30`);
+            const hist = await histRes.json();
+            const ctx = document.getElementById('chart').getContext('2d');
+            new Chart(ctx, { type: 'line', data: { labels: hist.data.map(d => d.date), datasets: [{ label: 'Close', data: hist.data.map(d => d.Close) }] } });
+
+            // Fetch dividends
+            const divRes = await fetch(`/api/dividends/${ticker}`);
+            const divs = await divRes.json();
+            document.getElementById('dividends').innerHTML = `<h3>Recent Dividends:</h3><ul>${divs.dividends.map(d => `<li>${d.date}: $${d.amount}</li>`).join('')}</ul>`;
+        }
+        loadData();  // Auto-load on start
+    </script>
+</body>
+</html>
